@@ -1,5 +1,4 @@
-/models
-/images
+*.png
+*.jpg
 *.db
-*.prototxt
 /tempCodeRunnerFile.py
