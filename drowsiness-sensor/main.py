@@ -15,6 +15,7 @@ from face_recognizer import load_face_models, detect_and_recognize_face
 from drowsiness_detector import calculate_ear, dist  # Import EAR helpers
 from arduino_comm import ArduinoComm
 from ui_manager import run_driver_manager_ui
+from logging_config import log_performance
 
 class PerformanceMonitor:
     """Monitors and records CPU and memory usage of the application."""
@@ -86,6 +87,14 @@ class PerformanceMonitor:
                 self.cpu_history.append(cpu_percent)
                 self.memory_history.append(memory_mb)
                 self.timestamp_history.append(current_time)
+                
+                # Log the performance metrics
+                metrics = {
+                    'cpu': cpu_percent,
+                    'memory': memory_mb,
+                    'fps': self.fps_history[-1] if self.fps_history else 0
+                }
+                log_performance(metrics)  # Use the logging system
                 
                 time.sleep(self.logging_interval)
                 
