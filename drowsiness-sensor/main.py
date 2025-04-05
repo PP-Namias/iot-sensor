@@ -15,7 +15,8 @@ from face_recognizer import load_face_models, detect_and_recognize_face
 from drowsiness_detector import calculate_ear, dist  # Import EAR helpers
 from arduino_comm import ArduinoComm
 from ui_manager import run_driver_manager_ui
-from logging_config import log_performance
+from logging_config import log_performance, log_event
+import logging
 
 class PerformanceMonitor:
     """Monitors and records CPU and memory usage of the application."""
@@ -56,14 +57,16 @@ class PerformanceMonitor:
             self.monitor_thread = threading.Thread(target=self._monitor_loop)
             self.monitor_thread.daemon = True
             self.monitor_thread.start()
-            print("Performance monitoring started")
+            print("Performance monitoring started")  # Keep console log
+            log_event("Performance monitoring started")  # Add log entry
             
     def stop(self):
         """Stop the monitoring thread."""
         self.running = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=3.0)
-        print("Performance monitoring stopped")
+        print("Performance monitoring stopped")  # Keep console log
+        log_event("Performance monitoring stopped")  # Add log entry
             
     def _monitor_loop(self):
         """Main monitoring loop that runs in a separate thread."""
@@ -94,12 +97,13 @@ class PerformanceMonitor:
                     'memory': memory_mb,
                     'fps': self.fps_history[-1] if self.fps_history else 0
                 }
-                log_performance(metrics)  # Use the logging system
+                log_performance(metrics)  # Log performance metrics
                 
                 time.sleep(self.logging_interval)
                 
             except Exception as e:
-                print(f"Error in performance monitoring: {e}")
+                print(f"Error in performance monitoring: {e}")  # Keep console log
+                log_event(f"Error in performance monitoring: {e}", level="error")  # Add log entry
                 time.sleep(self.logging_interval)
     
     def record_frame_processed(self):
@@ -192,13 +196,15 @@ class PerformanceMonitor:
 def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, known_encodings):
     """Runs the main drowsiness detection loop with facial recognition and periodic re-verification."""
     print("\nStarting Drowsiness Detection System Loop...")
-    
+    log_event("Starting Drowsiness Detection System Loop")  # Add log entry
+
     # Initialize performance monitoring
     perf_monitor = PerformanceMonitor(logging_interval=0.5)
     perf_monitor.start()
 
     # Initialize MediaPipe Face Mesh
     print("Initializing MediaPipe Face Mesh...")
+    log_event("Initializing MediaPipe Face Mesh")  # Add log entry
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = None
     try:
@@ -218,6 +224,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
     cap = cv2.VideoCapture(0)  # Use 0 for default webcam
     if not cap.isOpened():
         print("Error: Could not open webcam.")
+        log_event("Error: Could not open webcam", level="error")  # Add log entry
         if face_mesh: face_mesh.close()
         perf_monitor.stop()
         return
@@ -286,6 +293,10 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
             detected_id, detected_name, face_box = detect_and_recognize_face(
                 frame, face_detector, face_embedder, known_encodings
             )
+            if detected_id is not None:
+                log_event(f"Driver recognized: {detected_name} (ID: {detected_id})")  # Add log entry
+            else:
+                log_event("Driver recognition failed", level="warning")  # Add log entry
 
             recognition_passed = False
             if detected_id is not None:
@@ -349,6 +360,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
                             DROWSINESS_ALERT = True; TOTAL_ALERTS += 1
                             arduino_handler.send('1')  # Use handler
                             print(f"[{time.strftime('%H:%M:%S')}] ALERT: Drowsiness detected for {current_driver_name}!")
+                            log_event(f"ALERT: Drowsiness detected for {current_driver_name}!", level="warning")  # Add log entry
                     else:
                         eye_status = "Open"; COUNTER = 0
                         if DROWSINESS_ALERT:
@@ -408,6 +420,8 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
     # --- Cleanup ---
     print("\n--- Performance Summary ---")
     summary = perf_monitor.get_summary()
+    log_event("Final Performance Summary")  # Add log entry
+    log_performance(summary)  # Log final metrics
     print(f"Total frames processed: {summary['total_frames']}")
     print(f"Average CPU usage: {summary['avg_cpu']:.1f}%")
     print(f"Peak CPU usage: {summary['peak_cpu']:.1f}%")
@@ -432,6 +446,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
 # --- Main Execution ---
 if __name__ == "__main__":
     print("--- System Start ---")
+    log_event("System Start")  # Add log entry
     # Initialize components
     init_database()  # Ensure DB tables exist
     detector_net, embedder_net = load_face_models()
@@ -445,14 +460,17 @@ if __name__ == "__main__":
         if models_loaded:
             # Run UI only if models loaded (UI needs models for encoding)
             print("\nLaunching Driver Manager UI...")
+            log_event("Launching Driver Manager UI")  # Add log entry
             print("Close the UI window when finished managing drivers to start detection.")
             run_driver_manager_ui(detector_net, embedder_net)  # Pass models to UI
             print("Driver Manager UI closed.")
+            log_event("Driver Manager UI closed")  # Add log entry
 
             # Load encodings AFTER UI is closed
             known_encodings = load_all_driver_encodings()
             if not known_encodings:
                 print("Warning: No known driver encodings loaded. Recognition may not work.")
+                log_event("Warning: No known driver encodings loaded. Recognition may not work.", level="warning")  # Add log entry
 
             # Attempt to connect Arduino AFTER UI
             arduino.connect()
@@ -463,6 +481,7 @@ if __name__ == "__main__":
 
         else:
             print("\nCritical Error: Face models failed to load. Cannot proceed.")
+            log_event("Critical Error: Face models failed to load. Cannot proceed.", level="error")  # Add log entry
             print("Please ensure model files are correctly placed in the 'models' directory.")
 
     except Exception as main_exception:
@@ -470,15 +489,20 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()  # Print detailed traceback
         print(f"Error details: {main_exception}")
+        log_event(f"Unexpected error in main execution: {main_exception}", level="error")  # Add log entry
         print("-----------------------------------------------------------")
 
     finally:
         # Ensure Arduino disconnect is attempted regardless of errors
         print("--- System Shutdown ---")
+        log_event("System Shutdown")  # Add log entry
         if arduino and arduino.is_connected():
             arduino.disconnect()
         elif arduino_connected_initially:  # Log if initial connect worked but failed later
             print("Arduino was connected but may have encountered an error.")
+            log_event("Arduino was connected but may have encountered an error.", level="warning")  # Add log entry
         else:
             print("Arduino was not connected or connection failed.")
+            log_event("Arduino was not connected or connection failed.", level="warning")  # Add log entry
         print("Cleanup complete.")
+        log_event("Cleanup complete")  # Add log entry
