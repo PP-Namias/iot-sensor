@@ -29,6 +29,9 @@ def run_driver_manager_ui(face_detector_net, face_embedder_net):
     root.title("Truck Driver Management")
     root.geometry("700x550")
     
+    # Maximize the window on startup
+    root.state("zoomed")
+    
     # Create a frame for inputs
     input_frame = ctk.CTkFrame(root)
     input_frame.pack(pady=10, padx=10, fill="x")
