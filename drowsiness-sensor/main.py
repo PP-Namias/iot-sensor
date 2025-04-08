@@ -239,6 +239,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
     driver_authorized = False
     driver_locked_in = False
     last_verification_time = 0.0
+    is_unidentified_driver = False
     
     # For calculating time spent in each processing stage
     stage_times = {
@@ -274,7 +275,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
         perform_recognition = False
         status_text = ""
         status_color = (0, 0, 0)
-        status_if_fail = "Unauthorized Driver / No Face"
+        status_if_fail = "No Face Detected"
 
         if not driver_locked_in:
             perform_recognition = True
@@ -285,44 +286,80 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
             else:
                 perform_recognition = False
                 driver_authorized = True  # Maintain lock
-                status_text = f"Driver (Locked): {current_driver_name}"
-                status_color = (0, 255, 0)
+                if is_unidentified_driver:
+                    status_text = f"Driver (Unidentified)"
+                    status_color = (255, 165, 0)  # Orange for unidentified
+                else:
+                    status_text = f"Driver (Locked): {current_driver_name}"
+                    status_color = (0, 255, 0)  # Green for identified
 
         if perform_recognition:
             # Pass loaded models to the recognition function
-            detected_id, detected_name, face_box = detect_and_recognize_face(
+            detected_id, detected_name, face_box, is_unidentified = detect_and_recognize_face(
                 frame, face_detector, face_embedder, known_encodings
             )
-            if detected_id is not None:
-                log_event(f"Driver recognized: {detected_name} (ID: {detected_id})")  # Add log entry
+            
+            # Log appropriate message based on detection result
+            if detected_id == "unidentified" and is_unidentified:
+                log_event("Unidentified driver detected")
+            elif detected_id is not None:
+                log_event(f"Driver recognized: {detected_name} (ID: {detected_id})")
             else:
-                log_event("Driver recognition failed", level="warning")  # Add log entry
+                log_event("No driver detected", level="warning")
 
             recognition_passed = False
             if detected_id is not None:
-                if driver_locked_in:  # Re-verification check
-                    if detected_id == current_driver_id: recognition_passed = True
-                    else: print(f"[{time.strftime('%H:%M:%S')}] Verification FAILED: Detected '{detected_name}' != '{current_driver_name}'. Lock out.")
-                else:  # Initial recognition
+                if driver_locked_in and not is_unidentified_driver:  # Re-verification check for identified driver
+                    if detected_id == current_driver_id: 
+                        recognition_passed = True
+                    else: 
+                        print(f"[{time.strftime('%H:%M:%S')}] Verification FAILED: Detected '{detected_name}' != '{current_driver_name}'. Lock out.")
+                else:  # Initial recognition or unidentified driver
                     recognition_passed = True
 
             if recognition_passed:
-                if not driver_locked_in: print(f"[{time.strftime('%H:%M:%S')}] Driver locked in: {detected_name} (ID: {detected_id})")
-                elif current_time - last_verification_time >= config.VERIFICATION_INTERVAL: print(f"[{time.strftime('%H:%M:%S')}] Re-verification OK for {detected_name}.")
+                if not driver_locked_in:
+                    if detected_id == "unidentified":
+                        print(f"[{time.strftime('%H:%M:%S')}] Unidentified driver detected and locked in")
+                        is_unidentified_driver = True
+                    else:
+                        print(f"[{time.strftime('%H:%M:%S')}] Driver locked in: {detected_name} (ID: {detected_id})")
+                        is_unidentified_driver = False
+                elif current_time - last_verification_time >= config.VERIFICATION_INTERVAL:
+                    if detected_id == "unidentified":
+                        print(f"[{time.strftime('%H:%M:%S')}] Re-verification OK for unidentified driver.")
+                    else:
+                        print(f"[{time.strftime('%H:%M:%S')}] Re-verification OK for {detected_name}.")
 
-                driver_authorized = True; driver_locked_in = True
+                driver_authorized = True
+                driver_locked_in = True
                 last_verification_time = current_time
-                current_driver_id = detected_id; current_driver_name = detected_name
-                status_text = f"Driver (Locked): {current_driver_name}"
-                status_color = (0, 255, 0)
-                if face_box: cv2.rectangle(frame, (face_box[0], face_box[1]), (face_box[2], face_box[3]), status_color, 2)
+                current_driver_id = detected_id
+                current_driver_name = detected_name
+                
+                if is_unidentified_driver:
+                    status_text = "Driver (Unidentified)"
+                    status_color = (255, 165, 0)  # Orange for unidentified
+                else:
+                    status_text = f"Driver (Locked): {current_driver_name}"
+                    status_color = (0, 255, 0)  # Green for identified
+                
+                if face_box: 
+                    cv2.rectangle(frame, (face_box[0], face_box[1]), (face_box[2], face_box[3]), status_color, 2)
             else:  # Recognition failed or wrong driver during re-check
-                if driver_locked_in: print(f"[{time.strftime('%H:%M:%S')}] Verification FAILED for {current_driver_name}. Locking out.")
-                driver_authorized = False; driver_locked_in = False
-                current_driver_id = None; current_driver_name = None
+                if driver_locked_in: 
+                    print(f"[{time.strftime('%H:%M:%S')}] Verification FAILED. Locking out.")
+                driver_authorized = False
+                driver_locked_in = False
+                current_driver_id = None
+                current_driver_name = None
+                is_unidentified_driver = False
                 last_verification_time = 0.0
-                status_text = status_if_fail; status_color = (0, 0, 255)
-                if DROWSINESS_ALERT: arduino_handler.send('0'); DROWSINESS_ALERT = False  # Use handler
+                status_text = status_if_fail
+                status_color = (0, 0, 255)
+                if DROWSINESS_ALERT: 
+                    arduino_handler.send('0')
+                    DROWSINESS_ALERT = False
                 COUNTER = 0
 
         # Display driver status
@@ -332,7 +369,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
 
         # --- Stage 2: Drowsiness Detection ---
         drowsy_start_time = time.time()
-        if driver_authorized:
+        if driver_authorized:  # Apply drowsiness detection for both identified and unidentified drivers
             image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             # Make MediaPipe processing optional or handle errors
             try:
@@ -341,38 +378,59 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
                 print(f"Error processing frame with MediaPipe: {e}")
                 results = None  # Ensure results is None on error
 
-            ear = 1.0; eye_status = "Open"
+            ear = 1.0
+            eye_status = "Open"
             if results and results.multi_face_landmarks:
                 face_landmarks = results.multi_face_landmarks[0]
                 left_eye_lm, right_eye_lm = [], []
                 valid_landmarks = True
                 try:
-                    for idx in config.LEFT_EYE_INDICES: left_eye_lm.append((int(face_landmarks.landmark[idx].x * image_width), int(face_landmarks.landmark[idx].y * image_height)))
-                    for idx in config.RIGHT_EYE_INDICES: right_eye_lm.append((int(face_landmarks.landmark[idx].x * image_width), int(face_landmarks.landmark[idx].y * image_height)))
-                    if len(left_eye_lm) != 6 or len(right_eye_lm) != 6: valid_landmarks = False
-                except (IndexError, TypeError): valid_landmarks = False; eye_status = "Error: Landmarks"
+                    for idx in config.LEFT_EYE_INDICES: 
+                        left_eye_lm.append((int(face_landmarks.landmark[idx].x * image_width), 
+                                           int(face_landmarks.landmark[idx].y * image_height)))
+                    for idx in config.RIGHT_EYE_INDICES: 
+                        right_eye_lm.append((int(face_landmarks.landmark[idx].x * image_width), 
+                                            int(face_landmarks.landmark[idx].y * image_height)))
+                    if len(left_eye_lm) != 6 or len(right_eye_lm) != 6: 
+                        valid_landmarks = False
+                except (IndexError, TypeError): 
+                    valid_landmarks = False
+                    eye_status = "Error: Landmarks"
 
                 if valid_landmarks:
                     ear = (calculate_ear(left_eye_lm) + calculate_ear(right_eye_lm)) / 2.0
                     if ear < config.EYE_AR_THRESH:
-                        COUNTER += 1; eye_status = "Closed"
+                        COUNTER += 1
+                        eye_status = "Closed"
                         if COUNTER >= config.EYE_CLOSED_THRESH and not DROWSINESS_ALERT:
-                            DROWSINESS_ALERT = True; TOTAL_ALERTS += 1
+                            DROWSINESS_ALERT = True
+                            TOTAL_ALERTS += 1
                             arduino_handler.send('1')  # Use handler
-                            print(f"[{time.strftime('%H:%M:%S')}] ALERT: Drowsiness detected for {current_driver_name}!")
-                            log_event(f"ALERT: Drowsiness detected for {current_driver_name}!", level="warning")  # Add log entry
+                            driver_type = "unidentified driver" if is_unidentified_driver else current_driver_name
+                            print(f"[{time.strftime('%H:%M:%S')}] ALERT: Drowsiness detected for {driver_type}!")
+                            log_event(f"ALERT: Drowsiness detected for {driver_type}!", level="warning")
                     else:
-                        eye_status = "Open"; COUNTER = 0
+                        eye_status = "Open"
+                        COUNTER = 0
                         if DROWSINESS_ALERT:
-                            DROWSINESS_ALERT = False; arduino_handler.send('0'); print(f"[{time.strftime('%H:%M:%S')}] Alert deactivated.")
+                            DROWSINESS_ALERT = False
+                            arduino_handler.send('0')
+                            print(f"[{time.strftime('%H:%M:%S')}] Alert deactivated.")
                 else:  # Handle case where landmark extraction failed
-                    ear = 1.0; eye_status = "Error: Landmarks"
+                    ear = 1.0
+                    eye_status = "Error: Landmarks"
                     COUNTER = 0
-                    if DROWSINESS_ALERT: DROWSINESS_ALERT = False; arduino_handler.send('0')
+                    if DROWSINESS_ALERT: 
+                        DROWSINESS_ALERT = False
+                        arduino_handler.send('0')
 
             else:  # No face landmarks detected by MediaPipe
-                eye_status = "Open (No Landmarks)"; ear = 1.0; COUNTER = 0
-                if DROWSINESS_ALERT: DROWSINESS_ALERT = False; arduino_handler.send('0')
+                eye_status = "Open (No Landmarks)"
+                ear = 1.0
+                COUNTER = 0
+                if DROWSINESS_ALERT: 
+                    DROWSINESS_ALERT = False
+                    arduino_handler.send('0')
 
             # Display Drowsiness Info
             cv2.putText(frame, f"EAR: {ear:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
