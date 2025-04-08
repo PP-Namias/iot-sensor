@@ -7,6 +7,7 @@ import psutil
 import threading
 import matplotlib.pyplot as plt
 from collections import deque
+import pygame  # For sound alerts
 
 # Import project modules
 import config
@@ -17,6 +18,9 @@ from arduino_comm import ArduinoComm
 from ui_manager import run_driver_manager_ui
 from logging_config import log_performance, log_event
 import logging
+
+# Initialize pygame mixer for sound alerts
+pygame.mixer.init()
 
 class PerformanceMonitor:
     """Monitors and records CPU and memory usage of the application."""
@@ -206,6 +210,13 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
     print("Initializing MediaPipe Face Mesh...")
     log_event("Initializing MediaPipe Face Mesh")  # Add log entry
     mp_face_mesh = mp.solutions.face_mesh
+    mp_drawing = mp.solutions.drawing_utils
+    mp_drawing_styles = mp.solutions.drawing_styles
+    
+    # Custom drawing specs for better visualization
+    landmark_drawing_spec = mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=1, circle_radius=1)
+    connection_drawing_spec = mp_drawing.DrawingSpec(color=(255, 0, 255), thickness=1)
+    
     face_mesh = None
     try:
         face_mesh = mp_face_mesh.FaceMesh(
@@ -229,6 +240,28 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
         perf_monitor.stop()
         return
 
+    # Load alert sound
+    alert_sound_path = os.path.join(os.path.dirname(__file__), "alert.mp3")
+    # If alert sound doesn't exist, create a default one
+    if not os.path.exists(alert_sound_path):
+        try:
+            # Generate a simple beep sound using pygame
+            pygame.mixer.Sound(np.sin(2*np.pi*np.arange(44100*1)/44100*440).astype(np.float32)).save(alert_sound_path)
+            print(f"Created default alert sound at {alert_sound_path}")
+        except Exception as e:
+            print(f"Could not create default alert sound: {e}")
+            alert_sound_path = None
+    
+    # Load the alert sound if available
+    alert_sound = None
+    try:
+        if alert_sound_path and os.path.exists(alert_sound_path):
+            alert_sound = pygame.mixer.Sound(alert_sound_path)
+            print("Alert sound loaded successfully")
+    except Exception as e:
+        print(f"Error loading alert sound: {e}")
+        alert_sound = None
+
     # --- State Variables for Main Loop ---
     frame_count = 0  # Optional: for frame-based logic or debugging
     COUNTER = 0
@@ -249,7 +282,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
         'display': 0.0
     }
 
-    print("Detection loop running... Press 'q' in the video window to exit.")
+    print("Detection loop running... Press ESC in the video window to exit.")
     # --- Main Loop ---
     while cap.isOpened():
         loop_start_time = time.time()
@@ -380,49 +413,98 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
 
             ear = 1.0
             eye_status = "Open"
+            
+            # Draw face mesh landmarks if available
             if results and results.multi_face_landmarks:
-                face_landmarks = results.multi_face_landmarks[0]
-                left_eye_lm, right_eye_lm = [], []
-                valid_landmarks = True
-                try:
-                    for idx in config.LEFT_EYE_INDICES: 
-                        left_eye_lm.append((int(face_landmarks.landmark[idx].x * image_width), 
-                                           int(face_landmarks.landmark[idx].y * image_height)))
-                    for idx in config.RIGHT_EYE_INDICES: 
-                        right_eye_lm.append((int(face_landmarks.landmark[idx].x * image_width), 
-                                            int(face_landmarks.landmark[idx].y * image_height)))
-                    if len(left_eye_lm) != 6 or len(right_eye_lm) != 6: 
+                for face_landmarks in results.multi_face_landmarks:
+                    # Draw the face mesh
+                    mp_drawing.draw_landmarks(
+                        image=frame,
+                        landmark_list=face_landmarks,
+                        connections=mp_face_mesh.FACEMESH_TESSELATION,
+                        landmark_drawing_spec=None,
+                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style()
+                    )
+                    
+                    # Draw the face contours
+                    mp_drawing.draw_landmarks(
+                        image=frame,
+                        landmark_list=face_landmarks,
+                        connections=mp_face_mesh.FACEMESH_CONTOURS,
+                        landmark_drawing_spec=None,
+                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style()
+                    )
+                    
+                    # Draw eyes specifically with different color
+                    left_eye_lm, right_eye_lm = [], []
+                    valid_landmarks = True
+                    try:
+                        # Extract and draw left eye landmarks
+                        for idx in config.LEFT_EYE_INDICES: 
+                            x = int(face_landmarks.landmark[idx].x * image_width)
+                            y = int(face_landmarks.landmark[idx].y * image_height)
+                            left_eye_lm.append((x, y))
+                            # Draw eye landmark with larger circle and different color
+                            cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
+                        
+                        # Extract and draw right eye landmarks
+                        for idx in config.RIGHT_EYE_INDICES: 
+                            x = int(face_landmarks.landmark[idx].x * image_width)
+                            y = int(face_landmarks.landmark[idx].y * image_height)
+                            right_eye_lm.append((x, y))
+                            # Draw eye landmark with larger circle and different color
+                            cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
+                        
+                        # Draw nose tip with different color
+                        nose_tip_idx = 4  # MediaPipe nose tip landmark index
+                        nose_x = int(face_landmarks.landmark[nose_tip_idx].x * image_width)
+                        nose_y = int(face_landmarks.landmark[nose_tip_idx].y * image_height)
+                        cv2.circle(frame, (nose_x, nose_y), 3, (0, 0, 255), -1)
+                        
+                        # Draw mouth landmarks with different color
+                        mouth_indices = [61, 291, 0, 17]  # Some key mouth landmarks
+                        for idx in mouth_indices:
+                            x = int(face_landmarks.landmark[idx].x * image_width)
+                            y = int(face_landmarks.landmark[idx].y * image_height)
+                            cv2.circle(frame, (x, y), 2, (255, 0, 255), -1)
+                        
+                        if len(left_eye_lm) != 6 or len(right_eye_lm) != 6: 
+                            valid_landmarks = False
+                    except (IndexError, TypeError): 
                         valid_landmarks = False
-                except (IndexError, TypeError): 
-                    valid_landmarks = False
-                    eye_status = "Error: Landmarks"
+                        eye_status = "Error: Landmarks"
 
-                if valid_landmarks:
-                    ear = (calculate_ear(left_eye_lm) + calculate_ear(right_eye_lm)) / 2.0
-                    if ear < config.EYE_AR_THRESH:
-                        COUNTER += 1
-                        eye_status = "Closed"
-                        if COUNTER >= config.EYE_CLOSED_THRESH and not DROWSINESS_ALERT:
-                            DROWSINESS_ALERT = True
-                            TOTAL_ALERTS += 1
-                            arduino_handler.send('1')  # Use handler
-                            driver_type = "unidentified driver" if is_unidentified_driver else current_driver_name
-                            print(f"[{time.strftime('%H:%M:%S')}] ALERT: Drowsiness detected for {driver_type}!")
-                            log_event(f"ALERT: Drowsiness detected for {driver_type}!", level="warning")
-                    else:
-                        eye_status = "Open"
+                    if valid_landmarks:
+                        ear = (calculate_ear(left_eye_lm) + calculate_ear(right_eye_lm)) / 2.0
+                        if ear < config.EYE_AR_THRESH:
+                            COUNTER += 1
+                            eye_status = "Closed"
+                            if COUNTER >= config.EYE_CLOSED_THRESH and not DROWSINESS_ALERT:
+                                DROWSINESS_ALERT = True
+                                TOTAL_ALERTS += 1
+                                arduino_handler.send('1')  # Use handler
+                                
+                                # Play alert sound if available
+                                if alert_sound:
+                                    alert_sound.play()
+                                
+                                driver_type = "unidentified driver" if is_unidentified_driver else current_driver_name
+                                print(f"[{time.strftime('%H:%M:%S')}] ALERT: Drowsiness detected for {driver_type}!")
+                                log_event(f"ALERT: Drowsiness detected for {driver_type}!", level="warning")
+                        else:
+                            eye_status = "Open"
+                            COUNTER = 0
+                            if DROWSINESS_ALERT:
+                                DROWSINESS_ALERT = False
+                                arduino_handler.send('0')
+                                print(f"[{time.strftime('%H:%M:%S')}] Alert deactivated.")
+                    else:  # Handle case where landmark extraction failed
+                        ear = 1.0
+                        eye_status = "Error: Landmarks"
                         COUNTER = 0
-                        if DROWSINESS_ALERT:
+                        if DROWSINESS_ALERT: 
                             DROWSINESS_ALERT = False
                             arduino_handler.send('0')
-                            print(f"[{time.strftime('%H:%M:%S')}] Alert deactivated.")
-                else:  # Handle case where landmark extraction failed
-                    ear = 1.0
-                    eye_status = "Error: Landmarks"
-                    COUNTER = 0
-                    if DROWSINESS_ALERT: 
-                        DROWSINESS_ALERT = False
-                        arduino_handler.send('0')
 
             else:  # No face landmarks detected by MediaPipe
                 eye_status = "Open (No Landmarks)"
@@ -448,6 +530,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
         cv2.putText(frame, f"CPU: {metrics['cpu']:.1f}%", (image_width-200, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(frame, f"Memory: {metrics['memory']:.1f}MB", (image_width-200, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(frame, f"FPS: {metrics['fps']:.1f}", (image_width-200, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, "Press ESC to exit", (image_width-200, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         # --- Stage 3: Display Frame ---
         cv2.imshow('Drowsiness Detection & Driver Recognition', frame)
@@ -471,7 +554,8 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
             print("-----------------------------------")
 
         # --- Stage 4: Exit ---
-        if cv2.waitKey(5) & 0xFF == ord('q'):
+        # Changed from 'q' to ESC key (27)
+        if cv2.waitKey(5) & 0xFF == 27:  # 27 is the ASCII code for ESC key
             print("Exit requested.")
             break
 
