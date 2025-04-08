@@ -3,6 +3,7 @@ import sqlite3
 import os
 import numpy as np
 import config # Import configuration
+from logging_config import log_event
 
 def init_database():
     """Initializes the SQLite database and creates the necessary tables if they don't exist."""
@@ -31,12 +32,16 @@ def init_database():
         ''')
         conn.commit()
         print("Database initialized with drivers and driver_encodings tables.")
+        log_event("Database initialized successfully")  # Add log entry
     except sqlite3.Error as e:
         print(f"Database initialization error: {e}")
+        log_event(f"Database initialization error: {e}", level="error")  # Add log entry
     except OSError as e:
         print(f"Error creating image directory '{config.IMAGE_DIR}': {e}")
+        log_event(f"Error creating image directory '{config.IMAGE_DIR}': {e}", level="error")  # Add log entry
     except Exception as e:
         print(f"An unexpected error occurred during database initialization: {e}")
+        log_event(f"An unexpected error occurred during database initialization: {e}", level="error")  # Add log entry
     finally:
         if conn:
             conn.close()

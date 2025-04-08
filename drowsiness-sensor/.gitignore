@@ -2,3 +2,4 @@
 *.jpg
 *.db
 /tempCodeRunnerFile.py
+*.log

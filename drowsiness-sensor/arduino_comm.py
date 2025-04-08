@@ -2,6 +2,7 @@
 import serial
 import time
 import config # Use constants from config
+from logging_config import log_event
 
 class ArduinoComm:
     def __init__(self, port=config.ARDUINO_PORT, baudrate=config.ARDUINO_BAUDRATE, timeout=config.ARDUINO_TIMEOUT):
@@ -29,6 +30,7 @@ class ArduinoComm:
             time.sleep(0.1)
             if success:
                  print("Successfully connected and communicated with Arduino.")
+                 log_event(f"Connected to Arduino on {self.port}")  # Add log entry
                  return True
             else:
                  # If initial send fails, connection likely didn't establish properly
@@ -38,11 +40,13 @@ class ArduinoComm:
         except serial.SerialException as e:
             self.connected = False
             print(f"Failed to connect to Arduino on {self.port}: {e}")
+            log_event(f"Arduino connection failed: {e}", level="error")  # Add log entry
             self.arduino = None
             return False
         except Exception as e:
              self.connected = False
              print(f"An unexpected error occurred during Arduino initialization: {e}")
+             log_event(f"Arduino connection failed: {e}", level="error")  # Add log entry
              self.arduino = None
              return False
 
