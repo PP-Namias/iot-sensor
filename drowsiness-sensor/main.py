@@ -493,9 +493,21 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
                                 TOTAL_ALERTS += 1
                                 arduino_handler.send('1')  # Use handler
                                 
-                                # Play alert sound if available
+                                # Play normal alert sound if available
                                 if alert_sound:
                                     alert_sound.play()
+                                
+                                # If the safety threshold is reached, play additional voice alert
+                                if TOTAL_ALERTS >= 5:
+                                    voice_alert_path = os.path.join(os.path.dirname(__file__), "alertvoice1.mp3")
+                                    if os.path.exists(voice_alert_path):
+                                        try:
+                                            voice_alert = pygame.mixer.Sound(voice_alert_path)
+                                            voice_alert.play()
+                                        except Exception as e:
+                                            print("Error playing voice alert:", e)
+                                    else:
+                                        print("Voice alert file alertvoice1.mp3 not found.")
                                 
                                 driver_type = "unidentified driver" if is_unidentified_driver else current_driver_name
                                 print(f"[{time.strftime('%H:%M:%S')}] ALERT: Drowsiness detected for {driver_type}!")
