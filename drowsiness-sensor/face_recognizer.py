@@ -92,34 +92,38 @@ def get_face_encoding_from_image(image_path, face_detector, face_embedder):
         return None
 
 def detect_and_recognize_face(frame, face_detector, face_embedder, known_encodings):
-    """Detects faces, computes embeddings, and compares against known encodings."""
+    """
+    Detects faces, computes embeddings, and compares against known encodings.
+    Returns information about both identified and unidentified faces.
+    """
     if frame is None or frame.size == 0 or not face_detector or not face_embedder:
-        return None, None, None
+        return None, None, None, False
 
     recognized_driver_id = None
     recognized_driver_name = None
     face_box = None
+    is_unidentified = False
     min_dist = float('inf')
     detections = None
 
     try:
         (h, w) = frame.shape[:2]
-        if h == 0 or w == 0: return None, None, None
+        if h == 0 or w == 0: return None, None, None, False
 
         resized_frame = cv2.resize(frame, (300, 300))
-        if resized_frame.size == 0: return None, None, None
+        if resized_frame.size == 0: return None, None, None, False
         blob = cv2.dnn.blobFromImage(resized_frame, 1.0, (300, 300), (104.0, 177.0, 123.0))
-        if blob.size == 0: return None, None, None
+        if blob.size == 0: return None, None, None, False
 
         face_detector.setInput(blob)
         detections = face_detector.forward()
 
     except Exception as e:
         # print(f"Error during live face detection: {e}") # Can be noisy
-        return None, None, None
+        return None, None, None, False
 
     if detections is None or detections.shape[2] == 0:
-         return None, None, None
+         return None, None, None, False
 
     # Iterate through detections
     for i in range(0, detections.shape[2]):
@@ -148,6 +152,7 @@ def detect_and_recognize_face(frame, face_detector, face_embedder, known_encodin
             if detected_encoding is None: continue
 
             # Compare with known encodings
+            matched = False
             for driver_id, name, known_encoding in known_encodings:
                 if not isinstance(known_encoding, np.ndarray): continue
                 try:
@@ -157,11 +162,21 @@ def detect_and_recognize_face(frame, face_detector, face_embedder, known_encodin
                         recognized_driver_id = driver_id
                         recognized_driver_name = name
                         face_box = (startX, startY, endX, endY)
+                        matched = True
                 except Exception as e:
                      print(f"Error calculating distance: {e}") # Should not happen often
+            
+            # If no match found but face detected, mark as unidentified
+            if not matched:
+                is_unidentified = True
+                face_box = (startX, startY, endX, endY)
+                # Only set as unidentified if we don't have a recognized driver
+                if recognized_driver_id is None:
+                    recognized_driver_id = "unidentified"
+                    recognized_driver_name = "Unidentified Driver"
 
             # Lock onto the first good match found in this frame's detections
             if recognized_driver_id is not None:
                 break # Exit detection loop once a match is found
 
-    return recognized_driver_id, recognized_driver_name, face_box
+    return recognized_driver_id, recognized_driver_name, face_box, is_unidentified
