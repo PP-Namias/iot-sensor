@@ -274,6 +274,9 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
     last_verification_time = 0.0
     is_unidentified_driver = False
     
+    # Toggle for visualization
+    show_visualization = True  # Start with visualization enabled
+    
     # For calculating time spent in each processing stage
     stage_times = {
         'frame_capture': 0.0,
@@ -417,23 +420,25 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
             # Draw face mesh landmarks if available
             if results and results.multi_face_landmarks:
                 for face_landmarks in results.multi_face_landmarks:
-                    # Draw the face mesh
-                    mp_drawing.draw_landmarks(
-                        image=frame,
-                        landmark_list=face_landmarks,
-                        connections=mp_face_mesh.FACEMESH_TESSELATION,
-                        landmark_drawing_spec=None,
-                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style()
-                    )
-                    
-                    # Draw the face contours
-                    mp_drawing.draw_landmarks(
-                        image=frame,
-                        landmark_list=face_landmarks,
-                        connections=mp_face_mesh.FACEMESH_CONTOURS,
-                        landmark_drawing_spec=None,
-                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style()
-                    )
+                    # Only draw visualizations if enabled
+                    if show_visualization:
+                        # Draw the face mesh
+                        mp_drawing.draw_landmarks(
+                            image=frame,
+                            landmark_list=face_landmarks,
+                            connections=mp_face_mesh.FACEMESH_TESSELATION,
+                            landmark_drawing_spec=None,
+                            connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style()
+                        )
+                        
+                        # Draw the face contours
+                        mp_drawing.draw_landmarks(
+                            image=frame,
+                            landmark_list=face_landmarks,
+                            connections=mp_face_mesh.FACEMESH_CONTOURS,
+                            landmark_drawing_spec=None,
+                            connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style()
+                        )
                     
                     # Draw eyes specifically with different color
                     left_eye_lm, right_eye_lm = [], []
@@ -445,7 +450,8 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
                             y = int(face_landmarks.landmark[idx].y * image_height)
                             left_eye_lm.append((x, y))
                             # Draw eye landmark with larger circle and different color
-                            cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
+                            if show_visualization:
+                                cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
                         
                         # Extract and draw right eye landmarks
                         for idx in config.RIGHT_EYE_INDICES: 
@@ -453,20 +459,23 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
                             y = int(face_landmarks.landmark[idx].y * image_height)
                             right_eye_lm.append((x, y))
                             # Draw eye landmark with larger circle and different color
-                            cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
+                            if show_visualization:
+                                cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
                         
                         # Draw nose tip with different color
                         nose_tip_idx = 4  # MediaPipe nose tip landmark index
                         nose_x = int(face_landmarks.landmark[nose_tip_idx].x * image_width)
                         nose_y = int(face_landmarks.landmark[nose_tip_idx].y * image_height)
-                        cv2.circle(frame, (nose_x, nose_y), 3, (0, 0, 255), -1)
+                        if show_visualization:
+                            cv2.circle(frame, (nose_x, nose_y), 3, (0, 0, 255), -1)
                         
                         # Draw mouth landmarks with different color
                         mouth_indices = [61, 291, 0, 17]  # Some key mouth landmarks
                         for idx in mouth_indices:
                             x = int(face_landmarks.landmark[idx].x * image_width)
                             y = int(face_landmarks.landmark[idx].y * image_height)
-                            cv2.circle(frame, (x, y), 2, (255, 0, 255), -1)
+                            if show_visualization:
+                                cv2.circle(frame, (x, y), 2, (255, 0, 255), -1)
                         
                         if len(left_eye_lm) != 6 or len(right_eye_lm) != 6: 
                             valid_landmarks = False
@@ -531,6 +540,10 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
         cv2.putText(frame, f"Memory: {metrics['memory']:.1f}MB", (image_width-200, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(frame, f"FPS: {metrics['fps']:.1f}", (image_width-200, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(frame, "Press ESC to exit", (image_width-200, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        # Add visualization toggle status
+        vis_status = "ON" if show_visualization else "OFF"
+        cv2.putText(frame, f"Visualization: {vis_status} (Press Enter to toggle)", (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         # --- Stage 3: Display Frame ---
         cv2.imshow('Drowsiness Detection & Driver Recognition', frame)
@@ -555,9 +568,16 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
 
         # --- Stage 4: Exit ---
         # Changed from 'q' to ESC key (27)
-        if cv2.waitKey(5) & 0xFF == 27:  # 27 is the ASCII code for ESC key
+        # --- Stage 4: Key Input Handling ---
+        key = cv2.waitKey(5) & 0xFF
+        if key == 27:  # ESC key
             print("Exit requested.")
             break
+        elif key == 13:  # Enter key
+            show_visualization = not show_visualization
+            status = "ON" if show_visualization else "OFF"
+            print(f"[{time.strftime('%H:%M:%S')}] Face visualization toggled {status}")
+            log_event(f"Face visualization toggled {status}")
 
     # --- Cleanup ---
     print("\n--- Performance Summary ---")
