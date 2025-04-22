@@ -353,6 +353,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
                 else:  # Initial recognition or unidentified driver
                     recognition_passed = True
 
+            # This section is in the recognition_passed block
             if recognition_passed:
                 if not driver_locked_in:
                     if detected_id == "unidentified":
@@ -373,6 +374,7 @@ def run_drowsiness_detection(arduino_handler, face_detector, face_embedder, know
                 current_driver_id = detected_id
                 current_driver_name = detected_name
                 
+                # IMPORTANT: Make sure to update status text every time verification passes
                 if is_unidentified_driver:
                     status_text = "Driver (Unidentified)"
                     status_color = (255, 165, 0)  # Orange for unidentified
@@ -695,6 +697,33 @@ if __name__ == "__main__":
             print("\nCritical Error: Face models failed to load. Cannot proceed.")
             log_event("Critical Error: Face models failed to load. Cannot proceed.", level="error")  # Add log entry
             print("Please ensure model files are correctly placed in the 'models' directory.")
+
+        # In your main loop:
+        tracking_info = {}  # {driver_id: (start_time, locked)}
+        closed_eye_duration = 0.0
+
+        while True:
+            # Process frame and get recognized driver
+            recognized_id, recognized_name, face_box, is_unidentified = detect_and_recognize_face(frame, ...)
+            
+            # Apply face tracking/locking
+            current_timestamp = time.time()
+            tracked_id, is_locked = face_tracker(recognized_id, current_timestamp, tracking_info)
+            
+            # If we have a locked ID but detected a different ID, stick with the locked one
+            if is_locked and tracked_id != recognized_id and tracked_id is not None:
+                recognized_id = tracked_id
+                # You'd need to look up the name again
+            
+            # Process eye landmarks here...
+            # Calculate EAR for both eyes
+            left_ear = calculate_ear(left_eye_landmarks)
+            right_ear = calculate_ear(right_eye_landmarks)
+            
+            # Check drowsiness with improved sensitivity
+            is_drowsy, closed_eye_duration = detect_drowsiness(
+                left_ear, right_ear, closed_eye_duration, threshold=0.23
+            )
 
     except Exception as main_exception:
         print(f"\n--- An unexpected error occurred in the main execution: ---")

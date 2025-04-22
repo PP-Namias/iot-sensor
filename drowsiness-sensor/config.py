@@ -12,8 +12,9 @@ ARDUINO_BAUDRATE = 9600
 ARDUINO_TIMEOUT = 1
 
 # --- Drowsiness Detection Settings ---
-EYE_AR_THRESH = 0.25  # Threshold for determining if the eye is closed
-EYE_CLOSED_THRESH = 15 # Number of consecutive frames eyes must be closed for alert
+# Increasing threshold to make eye closing detection less sensitive
+EYE_AR_THRESH = 0.20  # Lower value means eyes need to be more closed to trigger
+EYE_CLOSED_THRESH = 20 # Increased number of consecutive frames for alert
 
 # MediaPipe Face Mesh Settings
 FACE_MESH_MAX_FACES = 1
@@ -47,9 +48,17 @@ except Exception as e:
      FACE_DETECTOR_MODEL = None
      FACE_EMBEDDING_MODEL = None
 
+# FACE RECOGNITION CHANGES
+# Lower detection confidence to catch more potential faces
+FACE_DETECTION_CONFIDENCE = 0.5  # Was 0.6
 
-FACE_DETECTION_CONFIDENCE = 0.6 # Min confidence for DNN face detection
-FACE_RECOGNITION_THRESHOLD = 0.6 # Max Euclidean distance for face match
+# Increase recognition threshold to be more lenient with matching
+FACE_RECOGNITION_THRESHOLD = 1.0  # Was 0.6 (higher value = more lenient matching)
 
 # --- Lock-in Feature Settings ---
-VERIFICATION_INTERVAL = 5.0  # Re-verify driver every 5 seconds
+# Implementing the face locking feature you requested
+FACE_LOCK_DURATION = 60.0  # Lock onto a face for 60 seconds (1 minute)
+FACE_LOCK_REQUIRED_TIME = 2.0  # Seconds of continuous detection before locking
+
+# Reduce verification interval to ensure we catch the face quickly
+VERIFICATION_INTERVAL = 120.0  # Re-verify driver every 1 second

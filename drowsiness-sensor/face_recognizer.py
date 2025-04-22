@@ -157,12 +157,13 @@ def detect_and_recognize_face(frame, face_detector, face_embedder, known_encodin
                 if not isinstance(known_encoding, np.ndarray): continue
                 try:
                      distance = np.linalg.norm(known_encoding - detected_encoding)
-                     if distance < config.FACE_RECOGNITION_THRESHOLD and distance < min_dist:
-                        min_dist = distance
-                        recognized_driver_id = driver_id
-                        recognized_driver_name = name
-                        face_box = (startX, startY, endX, endY)
-                        matched = True
+                     if distance < config.FACE_RECOGNITION_THRESHOLD:
+                        if distance < min_dist:
+                            min_dist = distance
+                            recognized_driver_id = driver_id
+                            recognized_driver_name = name
+                            face_box = (startX, startY, endX, endY)
+                            matched = True
                 except Exception as e:
                      print(f"Error calculating distance: {e}") # Should not happen often
             
